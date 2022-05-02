@@ -87,7 +87,8 @@ def train(**kwargs):
                 print('The generated ROI and ROI score lengths are inconsistent')
             trainer.train_step(img, bbox, label, scale, target_features_list, rois=rois, roi_scores=roi_scores)
 
-            if (ii) % opt.plot_every == 0:
+            #if (ii) % opt.plot_every == 0:
+            if (ii) % 9999999 == 0:
                 if os.path.exists(opt.debug_file):
                     ipdb.set_trace()
 

@@ -28,66 +28,98 @@ CUDA_NUM_THREADS = 1024
 def GET_BLOCKS(N, K=CUDA_NUM_THREADS):
     return (N + K - 1) // K
 
+class RoIPoolFunction(Function):
+    def __init__(ctx, pooled_height, pooled_width, spatial_scale):
+        ctx.pooled_width = pooled_width
+        ctx.pooled_height = pooled_height
+        ctx.spatial_scale = spatial_scale
+        ctx.feature_size = None
 
-class RoI(Function):
-    """
-    NOTE：only CUDA-compatible
-    """
-
-    # def __init__(self, outh, outw, spatial_scale):
-    #     self.forward_fn = load_kernel('roi_forward', kernel_forward)
-    #     self.backward_fn = load_kernel('roi_backward', kernel_backward)
-    #     self.outh, self.outw, self.spatial_scale = outh, outw, spatial_scale
-    
-    @staticmethod
-    def forward(ctx, x, rois,outh, outw, spatial_scale):
-        # NOTE: MAKE SURE input is contiguous too
-        ctx.outh, ctx.outw,ctx.spatial_scale =  outh, outw, spatial_scale
-        ctx.forward_fn =  load_kernel('roi_forward', kernel_forward)
-        ctx.backward_fn = load_kernel('roi_backward', kernel_backward)
-        x = x.contiguous()
-        rois = rois.contiguous()
-        ctx.in_size = B, C, H, W = x.size()
-        ctx.N = N = rois.size(0)
-        output = t.zeros(N, C, ctx.outh, ctx.outw).cuda()
-        ctx.argmax_data = t.zeros(N, C, ctx.outh, ctx.outw).int().cuda()
+    def forward(ctx, features, rois): 
+        ctx.feature_size = features.size()           
+        batch_size, num_channels, data_height, data_width = ctx.feature_size
+        num_rois = rois.size(0)
+        output = features.new(num_rois, num_channels, ctx.pooled_height, ctx.pooled_width).zero_()
+        ctx.argmax = features.new(num_rois, num_channels, ctx.pooled_height, ctx.pooled_width).zero_().int()
         ctx.rois = rois
-        args = [x.data_ptr(), rois.data_ptr(),
-                output.data_ptr(),
-                ctx.argmax_data.data_ptr(),
-                ctx.spatial_scale, C, H, W,
-                ctx.outh, ctx.outw,
-                output.numel()]
-        stream = Stream(ptr=torch.cuda.current_stream().cuda_stream)
-        ctx.forward_fn(args=args,
-                        block=(CUDA_NUM_THREADS, 1, 1),
-                        grid=(GET_BLOCKS(output.numel()), 1, 1),
-                        stream=stream)
-        ctx.save_for_backward(output)
+        if not features.is_cuda:
+            _features = features.permute(0, 2, 3, 1)
+            roi_pooling.roi_pooling_forward(ctx.pooled_height, ctx.pooled_width, ctx.spatial_scale,
+                                            _features, rois, output)
+        else:
+            roi_pooling.roi_pooling_forward_cuda(ctx.pooled_height, ctx.pooled_width, ctx.spatial_scale,
+                                                 features, rois, output, ctx.argmax)
+
         return output
-    @staticmethod
+
     def backward(ctx, grad_output):
-        ##NOTE: IMPORTANT CONTIGUOUS
-        # TODO: input
-        output,= ctx.saved_tensors
-        #grad_output = grad_output * output
-        grad_output = grad_output.contiguous()
-        B, C, H, W = ctx.in_size
-        grad_input = t.zeros(ctx.in_size).cuda()
-        stream = Stream(ptr=torch.cuda.current_stream().cuda_stream)
-        args = [grad_output.data_ptr(),
-                ctx.argmax_data.data_ptr(),
-                ctx.rois.data_ptr(),
-                grad_input.data_ptr(),
-                ctx.N, ctx.spatial_scale, C, H, W, ctx.outh, ctx.outw,
-                grad_input.numel()]
-        ctx.backward_fn(args=args,
-                         block=(CUDA_NUM_THREADS, 1, 1),
-                         grid=(GET_BLOCKS(grad_input.numel()), 1, 1),
-                         stream=stream
-                         )
-        grad_input = grad_input * output
+        assert(ctx.feature_size is not None and grad_output.is_cuda)
+        batch_size, num_channels, data_height, data_width = ctx.feature_size
+        grad_input = grad_output.new(batch_size, num_channels, data_height, data_width).zero_()
+
+        roi_pooling.roi_pooling_backward_cuda(ctx.pooled_height, ctx.pooled_width, ctx.spatial_scale,
+                                              grad_output, ctx.rois, grad_input, ctx.argmax)
+
         return grad_input, None
+# class RoI(Function):
+#     """
+#     NOTE：only CUDA-compatible
+#     """
+
+#     # def __init__(self, outh, outw, spatial_scale):
+#     #     self.forward_fn = load_kernel('roi_forward', kernel_forward)
+#     #     self.backward_fn = load_kernel('roi_backward', kernel_backward)
+#     #     self.outh, self.outw, self.spatial_scale = outh, outw, spatial_scale
+    
+#     @staticmethod
+#     def forward(ctx, x, rois,outh, outw, spatial_scale):
+#         # NOTE: MAKE SURE input is contiguous too
+#         ctx.outh, ctx.outw,ctx.spatial_scale =  outh, outw, spatial_scale
+#         ctx.forward_fn =  load_kernel('roi_forward', kernel_forward)
+#         ctx.backward_fn = load_kernel('roi_backward', kernel_backward)
+#         x = x.contiguous()
+#         rois = rois.contiguous()
+#         ctx.in_size = B, C, H, W = x.size()
+#         ctx.N = N = rois.size(0)
+#         output = t.zeros(N, C, ctx.outh, ctx.outw).cuda()
+#         ctx.argmax_data = t.zeros(N, C, ctx.outh, ctx.outw).int().cuda()
+#         ctx.rois = rois
+#         args = [x.data_ptr(), rois.data_ptr(),
+#                 output.data_ptr(),
+#                 ctx.argmax_data.data_ptr(),
+#                 ctx.spatial_scale, C, H, W,
+#                 ctx.outh, ctx.outw,
+#                 output.numel()]
+#         stream = Stream(ptr=torch.cuda.current_stream().cuda_stream)
+#         ctx.forward_fn(args=args,
+#                         block=(CUDA_NUM_THREADS, 1, 1),
+#                         grid=(GET_BLOCKS(output.numel()), 1, 1),
+#                         stream=stream)
+#         ctx.save_for_backward(output)
+#         return output
+#     @staticmethod
+#     def backward(ctx, grad_output):
+#         ##NOTE: IMPORTANT CONTIGUOUS
+#         # TODO: input
+#         output,= ctx.saved_tensors
+#         grad_output = grad_output * output
+#         grad_output = grad_output.contiguous()
+#         B, C, H, W = ctx.in_size
+#         grad_input = t.zeros(ctx.in_size).cuda()
+#         stream = Stream(ptr=torch.cuda.current_stream().cuda_stream)
+#         args = [grad_output.data_ptr(),
+#                 ctx.argmax_data.data_ptr(),
+#                 ctx.rois.data_ptr(),
+#                 grad_input.data_ptr(),
+#                 ctx.N, ctx.spatial_scale, C, H, W, ctx.outh, ctx.outw,
+#                 grad_input.numel()]
+#         ctx.backward_fn(args=args,
+#                          block=(CUDA_NUM_THREADS, 1, 1),
+#                          grid=(GET_BLOCKS(grad_input.numel()), 1, 1),
+#                          stream=stream
+#                          )
+#         #grad_input = grad_input * output
+#         return grad_output, None
 
 
 class RoIPooling2D(t.nn.Module):
@@ -95,10 +127,11 @@ class RoIPooling2D(t.nn.Module):
     def __init__(self, outh, outw, spatial_scale):
         super(RoIPooling2D, self).__init__()
         self.outh,self.outw,self.spatial_scale = outh, outw, spatial_scale
-        self.RoI = RoI()
+        #self.RoI = RoI()
+        self.RoI = RoIPoolFunction(self.outh,self.outw,self.spatial_scale)
 
     def forward(self, x, rois):
-        return self.RoI.apply(x, rois,self.outh,self.outw,self.spatial_scale)
+        return self.RoI.apply(x, rois)
 # class RoI(Function):
 #     """
 #     NOTE：only CUDA-compatible
