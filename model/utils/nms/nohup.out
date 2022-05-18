@@ -1,1 +1,2 @@
 /home/zhouchengyu/anaconda3/envs/ad/bin/python3: Error while finding module specification for 'visdom.server' (ModuleNotFoundError: No module named 'visdom')
+/home/zcy/python/anaconda3/envs/adob/bin/python3: Error while finding module specification for 'visdom.server' (ModuleNotFoundError: No module named 'visdom')

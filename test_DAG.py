@@ -293,93 +293,14 @@ def img2jpg(img, img_suffix, quality):
     return jpg_img
 
 
+
 if __name__ == '__main__':
     layer_idx = 20
-    _data = VOCBboxDataset(data_dir)
     faster_rcnn = FasterRCNNVGG16()
-    faster_rcnn.eval()
-    attacker = attacks.Blade_runner()
-    attacker.load(attacker_path)
-    attacker.eval()
-    trainer = BRFasterRcnnTrainer(faster_rcnn, attacker, \
-                                  layer_idx=layer_idx, attack_mode=True).cuda()
-    # trainer.load('/home/xlsy/Documents/CVPR19/final results/weights/fasterrcnn_img_0.701.pth')
-    trainer.load('/home/zcy/python/fasterrcnn_12211511_0.701052458187_torchvision_pretrain.pth')
+
     
-    quality_list = [100, 90, 80, 70, 60, 50, 40, 30, 20]
-    threshold = [0.7]
-    adv_det_list = []
-    
-    for quality in threshold:
-        img_detected_total = 0
-        adv_detected_total = 0
-        img_object_total = 0
-        total_distance = 0
-        total_time = 0
-        trainer.faster_rcnn.score_thresh = quality
-        for i in range(len(_data)):
-            # if i == 100:
-            #     print('===================================')
-            #     print(str(i) + ' imgs have been generated')
-            #     print('===================================')
-            #     break
 
-            img_detected = 0
-            adv_detected = 0
-            img_object = 0
 
-            # img,im_path = _data[i]
-            img, _, img_labels, _, img_id = _data[i]
-            # if int(img_id.split('.')[0]) > 231:
-            #     continue
-            img_labels_lists = np.unique(img_labels)
-            img = Variable(img.float().cuda())
-            # im_path_clone = b = '%s' % im_path
-            rois, roi_scores = faster_rcnn(img, flag=True)
-            rois_num = len(rois)
-            if rois_num < 300:
-                print(i)
-            im_path_clone = str(img_id)
-            # save_path = _data.save_dir + 'f0rcnn' + im_path.split('/')[-1]
-            save_path = _data.save_dir + im_path_clone.split('/')[-1] + '.jpg'
-            save_path_adv = _data.save_dir_adv + im_path_clone.split('/')[-1] + '.jpg'
-            save_path_perturb = _data.save_dir_perturb + 'frcnn_perturb_' + im_path_clone.split('/')[-1] + '.jpg'
 
-            if not os.path.exists(_data.save_dir):
-                os.makedirs(_data.save_dir)
-            if not os.path.exists(_data.save_dir_adv):
-                os.makedirs(_data.save_dir_adv)
-            if not os.path.exists(_data.save_dir_perturb):
-                os.makedirs(_data.save_dir_perturb)
 
-            ori_img_ = inverse_normalize(at.tonumpy(img[0]))
-            # _bboxes, _labels, _scores = trainer.faster_rcnn.predict([ori_img_],\
-            #         new_score=quality, visualize=True)
-            before = time.time()
-            adv_img, perturb, distance = trainer.attacker.perturb(img, save_perturb=save_path_perturb, rois=rois, roi_scores=roi_scores)
-            after = time.time()
-            generate_time = after-before
-            total_time = total_time + generate_time
-            total_distance = total_distance + distance
-            adv_img_ = inverse_normalize(at.tonumpy(adv_img[0]))
-            perturb_ = inverse_normalize(at.tonumpy(perturb[0]))
-            del adv_img, perturb, img
-            perturb_ = perturb_.transpose((1, 2, 0))
-
-            # 将图片从BGR转换为RGB格式进行保存
-            perturb_RGB = cv2.cvtColor(perturb_, cv2.COLOR_BGR2RGB)
-            ori_img_RGB = cv2.cvtColor(ori_img_.transpose((1, 2, 0)), cv2.COLOR_BGR2RGB)
-            adv_img_RGB = cv2.cvtColor(adv_img_.transpose((1, 2, 0)), cv2.COLOR_BGR2RGB)
-
-            cv2.imwrite(save_path_perturb, perturb_RGB)
-            cv2.imwrite(save_path, ori_img_RGB)
-            cv2.imwrite(save_path_adv, adv_img_RGB)
-            print('The mean distance between ori and adv is %f' % (total_distance / i))
-
-            #
-            # adv_bboxes, adv_labels, adv_scores = trainer.faster_rcnn.predict([adv_img_], \
-            #         new_score=quality, visualize=True, adv=True)
-
-            print('generate adv for ', img_id)
-        print('generate adv for all imgs')
 
